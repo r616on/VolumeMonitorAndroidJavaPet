@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <usb-device vendor-id="9025" /> <!-- Arduino Vendor ID -->
+    <!-- CH340/CH341 (китайские Arduino клоны) -->
+    <usb-device vendor-id="6790" product-id="21795" /> <!-- CH340 -->
+    <usb-device vendor-id="6790" product-id="29987" /> <!-- CH341 -->
+    <usb-device vendor-id="6790" product-id="21794" />
+    <usb-device vendor-id="6790" product-id="29988" />
+    <usb-device vendor-id="6790" product-id="29989" />
+
+    <!-- Широкий фильтр для всех CH34x -->
+    <usb-device vendor-id="6790" />
+
+    <!-- Оригинальные Arduino -->
+    <usb-device vendor-id="9025" />
+
+    <!-- FTDI для других клонов -->
+    <usb-device vendor-id="1027" />
+
+    <!-- Широкий фильтр для отладки -->
+    <usb-device class="255" subclass="255" protocol="255" />
 </resources>
