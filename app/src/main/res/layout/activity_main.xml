@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Заголовок -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📱 Монитор громкости"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="20dp"
+            android:layout_gravity="center_horizontal" />
+
+        <!-- Громкость -->
+        <TextView
+            android:id="@+id/volumeTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Громкость: --"
+            android:textSize="18sp"
+            android:layout_marginBottom="10dp" />
+
+        <!-- JSON -->
+        <TextView
+            android:id="@+id/jsonTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="JSON: {&quot;volume&quot;:--}"
+            android:textSize="16sp"
+            android:fontFamily="monospace"
+            android:background="#F0F0F0"
+            android:padding="10dp"
+            android:layout_marginBottom="10dp" />
+
+        <!-- Время -->
+        <TextView
+            android:id="@+id/timestampTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Время: --:--:--"
+            android:textSize="14sp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Статус USB -->
+        <TextView
+            android:id="@+id/usbStatusTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="USB: проверка..."
+            android:textSize="16sp"
+            android:textColor="#2196F3"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Выбранное устройство -->
+        <TextView
+            android:id="@+id/selectedDeviceTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Устройство не выбрано"
+            android:textSize="14sp"
+            android:background="#E8F5E8"
+            android:padding="10dp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Список USB устройств (Spinner) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:text="Выберите USB устройство:"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/usbDevicesSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp" />
+
+        <!-- Кнопки -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="20dp">
+
+            <Button
+                android:id="@+id/refreshButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Обновить"
+                android:layout_marginEnd="10dp" />
+
+            <Button
+                android:id="@+id/usbScanButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Сканировать"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <!-- Кнопка выбора устройства -->
+        <Button
+            android:id="@+id/selectDeviceButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Выбрать это устройство"
+            android:layout_marginBottom="10dp"
+            android:backgroundTint="#4CAF50" />
+
+        <!-- Кнопка разрешений -->
+        <Button
+            android:id="@+id/usbPermissionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Запросить разрешения для всех"
+            android:layout_marginBottom="20dp" />
+
+        <!-- Заголовок списка USB -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Подключенные USB устройства:"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="10dp" />
+
+        <!-- Контейнер для USB устройств -->
+        <LinearLayout
+            android:id="@+id/usbDevicesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#F8F9FA"
+            android:padding="15dp"
+            android:minHeight="100dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Сканирование..."
+                android:textSize="14sp"
+                android:textColor="#666666" />
+        </LinearLayout>
+
+        <!-- Информация -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Сервис работает в фоне"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginTop="20dp" />
+
+    </LinearLayout>
+</ScrollView>
