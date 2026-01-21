@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.example.volumemonitor.core.VolumeMonitorService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -418,7 +419,7 @@ class MainActivity : Activity() {
                         this,
                         device.deviceId,
                         Intent("com.example.volumemonitor.USB_PERMISSION"),
-                        android.app.PendingIntent.FLAG_MUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT
                     )
                     usbManager!!.requestPermission(device, permissionIntent)
                     requested++

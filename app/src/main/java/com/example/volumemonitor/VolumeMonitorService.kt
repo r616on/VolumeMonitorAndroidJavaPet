@@ -171,7 +171,7 @@ class VolumeMonitorService : Service() {
                 this,
                 0,
                 Intent(ACTION_USB_PERMISSION),
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                PendingIntent.FLAG_UPDATE_CURRENT
             )
             usbManager!!.requestPermission(device, permissionIntent)
             Log.d(TAG, "Запрос разрешения отправлен для: " + device.deviceName)
