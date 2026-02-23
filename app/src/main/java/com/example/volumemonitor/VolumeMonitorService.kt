@@ -16,16 +16,27 @@ import android.media.AudioManager
 import android.os.Binder
 import android.os.IBinder
 import android.util.Log
+import java.io.OutputStream
+import java.io.InputStream
 
 class VolumeMonitorService : Service() {
     private val TAG = "VolumeMonitor"
     private val ACTION_USB_PERMISSION = "com.example.volumemonitor.USB_PERMISSION"
 
+    // VENDOR_ID и PRODUCT_ID для Arduino Nano
+    private val ARDUINO_VENDOR_ID = 0x2341  // Arduino
+    private val ARDUINO_PRODUCT_ID = 0x0043  // Arduino Nano
+
+    // Классы интерфейсов для CDC/ACM
+    private val CDC_ACM_INTERFACE_CLASS = 0x02
+    private val CDC_DATA_INTERFACE_CLASS = 0x0A
+
     private var audioManager: AudioManager? = null
     private var usbManager: UsbManager? = null
     private var selectedUsbDevice: UsbDevice? = null
     private var usbConnection: UsbDeviceConnection? = null
-    private var usbEndpoint: UsbEndpoint? = null
+    private var outputStream: OutputStream? = null
+    private var inputStream: InputStream? = null
     private var previousVolume = -1
     private val binder: IBinder = LocalBinder()
 
@@ -43,14 +54,15 @@ class VolumeMonitorService : Service() {
                     val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                         if (device != null) {
-                            Log.i(TAG, "USB разрешение получено для: " + device.deviceName)
-                            usbStatus = "Разрешение получено: " + device.deviceName
+                            Log.i(TAG, "USB разрешение получено для: ${device.deviceName}")
+                            usbStatus = "Разрешение получено: ${device.deviceName}"
 
-                            // Если это выбранное устройство - подключаемся
-                            if (selectedUsbDevice != null &&
-                                selectedUsbDevice!!.deviceId == device.deviceId
-                            ) {
-                                setupUsbConnection(device)
+                            // Проверяем, это Arduino?
+                            if (isArduinoDevice(device)) {
+                                setupUsbSerialConnection(device)
+                            } else {
+                                usbStatus = "Не Arduino устройство"
+                                Log.w(TAG, "Это не Arduino устройство")
                             }
                         }
                     } else {
@@ -62,10 +74,16 @@ class VolumeMonitorService : Service() {
             } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED == action) {
                 val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
                 if (device != null) {
-                    Log.i(TAG, "USB устройство подключено: " + device.deviceName)
-                    usbStatus = "Устройство подключено: " + device.deviceName
-                    requestUsbPermission(device)
-                    sendUsbStatusUpdate("Устройство подключено: " + device.deviceName)
+                    Log.i(TAG, "USB устройство подключено: ${device.deviceName}")
+                    usbStatus = "Устройство подключено: ${device.deviceName}"
+
+                    if (isArduinoDevice(device)) {
+                        requestUsbPermission(device)
+                    } else {
+                        usbStatus = "Не Arduino устройство"
+                        Log.w(TAG, "Подключено не Arduino устройство: ${device.vendorId}:${device.productId}")
+                    }
+                    sendUsbStatusUpdate("Устройство подключено: ${device.deviceName}")
                 }
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {
                 Log.i(TAG, "USB устройство отключено")
@@ -83,7 +101,7 @@ class VolumeMonitorService : Service() {
             if ("android.media.VOLUME_CHANGED_ACTION" == intent.action) {
                 val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                 if (streamType == AudioManager.STREAM_MUSIC) {
-                    val currentVolume = audioManager!!.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    val currentVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
                     if (previousVolume != currentVolume) {
                         sendVolumeData(currentVolume)
                         Log.d(TAG, "Громкость изменилась: $currentVolume")
@@ -98,46 +116,209 @@ class VolumeMonitorService : Service() {
     }
 
     inner class LocalBinder : Binder() {
-        fun getService(): VolumeMonitorService {
-            return this@VolumeMonitorService
-        }
+        fun getService(): VolumeMonitorService = this@VolumeMonitorService
+    }
+
+    // Проверка, что это Arduino устройство
+    private fun isArduinoDevice(device: UsbDevice): Boolean {
+        return (device.vendorId == ARDUINO_VENDOR_ID &&
+                device.productId == ARDUINO_PRODUCT_ID)
     }
 
     // Метод для установки выбранного устройства
     fun setSelectedUsbDevice(device: UsbDevice?) {
         selectedUsbDevice = device
-        Log.d(
-            TAG,
-            "Выбрано устройство: " +
-                    if (device != null) device.deviceName else "null"
-        )
+        Log.d(TAG, "Выбрано устройство: ${device?.deviceName ?: "null"}")
 
-        // Закрываем старое соединение
         closeUsbConnection()
         if (device != null) {
-            // Проверяем разрешение
-            if (usbManager!!.hasPermission(device)) {
-                setupUsbConnection(device)
+            if (usbManager?.hasPermission(device) == true) {
+                setupUsbSerialConnection(device)
             } else {
-                usbStatus = "Нет разрешения для: " + device.deviceName
+                usbStatus = "Нет разрешения для: ${device.deviceName}"
                 requestUsbPermission(device)
             }
         }
     }
 
-    // Метод для отправки на конкретное устройство
-    fun sendVolumeDataToDevice(volumeLevel: Int, device: UsbDevice) {
-        Log.d(TAG, "Отправка на устройство: " + device.deviceName)
+    // Запрос разрешения USB
+    private fun requestUsbPermission(device: UsbDevice?) {
+        if (device == null) return
+        try {
+            val permissionIntent = PendingIntent.getBroadcast(
+                this,
+                0,
+                Intent(ACTION_USB_PERMISSION),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            usbManager?.requestPermission(device, permissionIntent)
+            Log.d(TAG, "Запрос разрешения отправлен для: ${device.deviceName}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка запроса разрешения: ${e.message}")
+        }
+    }
 
-        // Если это другое устройство - переключаемся
-        if (selectedUsbDevice == null ||
-            selectedUsbDevice!!.deviceId != device.deviceId
-        ) {
-            setSelectedUsbDevice(device)
+    // Настройка соединения через USB Serial
+    private fun setupUsbSerialConnection(device: UsbDevice?) {
+        if (device == null) {
+            Log.e(TAG, "Устройство null")
+            return
         }
 
-        // Отправляем данные
-        sendVolumeData(volumeLevel)
+        Log.i(TAG, "Настройка USB Serial соединения для: ${device.deviceName}")
+        Log.i(TAG, "Интерфейсы: ${device.interfaceCount}")
+
+        // Закрываем старое соединение
+        closeUsbConnection()
+
+        // Открываем устройство
+        usbConnection = usbManager?.openDevice(device)
+        if (usbConnection == null) {
+            Log.e(TAG, "Не удалось открыть USB устройство")
+            usbStatus = "Ошибка открытия USB: ${device.deviceName}"
+            return
+        }
+
+        // Ищем интерфейс CDC Data (класс 0x0A)
+        for (i in 0 until device.interfaceCount) {
+            val usbInterface = device.getInterface(i)
+            Log.d(TAG, "Интерфейс $i: class=0x${usbInterface.interfaceClass.toString(16)}, " +
+                    "subclass=0x${usbInterface.interfaceSubclass.toString(16)}")
+
+            if (usbInterface.interfaceClass == CDC_DATA_INTERFACE_CLASS) {
+                Log.d(TAG, "Найден CDC Data интерфейс")
+
+                if (usbConnection!!.claimInterface(usbInterface, true)) {
+                    Log.d(TAG, "Интерфейс захвачен: $i")
+
+                    // Ищем IN и OUT endpoints
+                    var inEndpoint: UsbEndpoint? = null
+                    var outEndpoint: UsbEndpoint? = null
+
+                    for (j in 0 until usbInterface.endpointCount) {
+                        val endpoint = usbInterface.getEndpoint(j)
+                        Log.d(TAG, "Endpoint $j: type=${endpoint.type}, address=0x${endpoint.address.toString(16)}, " +
+                                "direction=${endpoint.direction}")
+
+                        when (endpoint.direction) {
+                            UsbConstants.USB_DIR_IN -> inEndpoint = endpoint
+                            UsbConstants.USB_DIR_OUT -> outEndpoint = endpoint
+                        }
+                    }
+
+                    if (outEndpoint != null) {
+                        selectedUsbDevice = device
+                        isUsbConnected = true
+                        usbStatus = "Подключено: ${device.deviceName}"
+
+                        // Создаем OutputStream для отправки данных
+                        outputStream = object : OutputStream() {
+                            override fun write(buffer: ByteArray, offset: Int, count: Int) {
+                                usbConnection?.bulkTransfer(
+                                    outEndpoint!!,
+                                    buffer,
+                                    offset,
+                                    count,
+                                    1000
+                                )
+                            }
+
+                            override fun write(oneByte: Int) {
+                                val buffer = byteArrayOf(oneByte.toByte())
+                                usbConnection?.bulkTransfer(
+                                    outEndpoint!!,
+                                    buffer,
+                                    1,
+                                    1000
+                                )
+                            }
+                        }
+
+                        Log.i(TAG, "✅ USB Serial соединение установлено!")
+                        sendUsbStatusUpdate("USB подключено: ${device.deviceName}")
+
+                        // Отправляем тестовое сообщение
+                        sendTestMessage()
+                        return
+                    } else {
+                        Log.e(TAG, "Не найден OUT endpoint")
+                        usbConnection!!.releaseInterface(usbInterface)
+                    }
+                }
+            }
+        }
+
+        Log.e(TAG, "Не найден подходящий CDC Data интерфейс")
+        usbStatus = "Не найден CDC интерфейс для: ${device.deviceName}"
+        closeUsbConnection()
+    }
+
+    private fun sendTestMessage() {
+        if (!isUsbConnected || outputStream == null) {
+            return
+        }
+        val testMessage = "{\"test\":\"Android connected\"}\n"
+        try {
+            outputStream!!.write(testMessage.toByteArray(Charsets.UTF_8))
+            Log.i(TAG, "✅ Тестовое сообщение отправлено успешно")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Ошибка отправки тестового сообщения: ${e.message}")
+        }
+    }
+
+    private fun closeUsbConnection() {
+        outputStream?.close()
+        inputStream?.close()
+        outputStream = null
+        inputStream = null
+
+        usbConnection?.close()
+        usbConnection = null
+        selectedUsbDevice = null
+        isUsbConnected = false
+    }
+
+    // ОСНОВНОЙ МЕТОД ОТПРАВКИ ДАННЫХ - ИСПРАВЛЕН
+    fun sendVolumeData(volumeLevel: Int) {
+        // Формируем JSON
+        val jsonData = "{\"volume\":$volumeLevel}\n"
+        Log.d(TAG, "Отправка данных: $jsonData")
+
+        // Отправка через USB Serial
+        if (isUsbConnected && outputStream != null) {
+            try {
+                // Преобразуем в байты
+                val dataBytes = jsonData.toByteArray(Charsets.UTF_8)
+
+                // Логируем HEX представление для отладки
+                val hexString = dataBytes.joinToString(" ") {
+                    String.format("%02X", it)
+                }
+                Log.d(TAG, "Отправляемые байты (HEX): $hexString")
+                Log.d(TAG, "Отправляемые байты (ASCII): ${String(dataBytes, Charsets.US_ASCII)}")
+
+                // Отправляем данные
+                outputStream!!.write(dataBytes)
+                outputStream!!.flush() // Важно: сбрасываем буфер
+
+                Log.i(TAG, "✅ Данные отправлены успешно: $volumeLevel")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Ошибка отправки данных: ${e.message}")
+                e.printStackTrace()
+
+                // Попытка переподключения
+                selectedUsbDevice?.let { setupUsbSerialConnection(it) }
+            }
+        } else {
+            val deviceName = selectedUsbDevice?.deviceName ?: "не выбрано"
+            Log.w(TAG, "⚠️ USB не подключено (устройство: $deviceName)")
+        }
+    }
+
+    private fun sendUsbStatusUpdate(status: String) {
+        val statusIntent = Intent("USB_STATUS_UPDATED")
+        statusIntent.putExtra("status", status)
+        sendBroadcast(statusIntent)
     }
 
     override fun onCreate() {
@@ -158,180 +339,23 @@ class VolumeMonitorService : Service() {
         registerReceiver(volumeReceiver, volumeFilter)
 
         // Инициализация громкости
-        if (audioManager != null) {
-            previousVolume = audioManager!!.getStreamVolume(AudioManager.STREAM_MUSIC)
-        }
+        previousVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
         Log.d(TAG, "Сервис создан успешно")
-    }
-
-    private fun requestUsbPermission(device: UsbDevice?) {
-        if (device == null) return
-        try {
-            val permissionIntent = PendingIntent.getBroadcast(
-                this,
-                0,
-                Intent(ACTION_USB_PERMISSION),
-                PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            usbManager!!.requestPermission(device, permissionIntent)
-            Log.d(TAG, "Запрос разрешения отправлен для: " + device.deviceName)
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка запроса разрешения: " + e.message)
-        }
-    }
-
-    private fun setupUsbConnection(device: UsbDevice?) {
-        if (device == null) {
-            Log.e(TAG, "Устройство null")
-            return
-        }
-        Log.i(TAG, "Настройка USB соединения для: " + device.deviceName)
-
-        // Закрываем старое соединение
-        closeUsbConnection()
-
-        // Открываем устройство
-        usbConnection = usbManager!!.openDevice(device)
-        if (usbConnection == null) {
-            Log.e(TAG, "Не удалось открыть USB устройство")
-            usbStatus = "Ошибка открытия USB: " + device.deviceName
-            return
-        }
-
-        // Ищем подходящий интерфейс
-        for (i in 0 until device.interfaceCount) {
-            val usbInterface = device.getInterface(i)
-            if (usbConnection!!.claimInterface(usbInterface, true)) {
-                Log.d(TAG, "Интерфейс захвачен: $i")
-
-                // Ищем OUT endpoint
-                for (j in 0 until usbInterface.endpointCount) {
-                    val endpoint = usbInterface.getEndpoint(j)
-                    if (endpoint.direction == UsbConstants.USB_DIR_OUT) {
-                        usbEndpoint = endpoint
-                        selectedUsbDevice = device
-                        isUsbConnected = true
-                        usbStatus = "Подключено: " + device.deviceName
-                        Log.i(TAG, "✅ USB соединение установлено!")
-                        Log.i(TAG, "Используется endpoint: 0x" + Integer.toHexString(endpoint.address))
-
-                        // Отправляем тестовое сообщение
-                        sendTestMessage()
-                        sendUsbStatusUpdate("USB подключено: " + device.deviceName)
-                        return
-                    }
-                }
-                usbConnection!!.releaseInterface(usbInterface)
-            }
-        }
-        Log.e(TAG, "Не найден подходящий OUT endpoint")
-        usbStatus = "Не найден OUT endpoint для: " + device.deviceName
-        closeUsbConnection()
-    }
-
-    private fun sendTestMessage() {
-        if (!isUsbConnected || usbConnection == null || usbEndpoint == null) {
-            return
-        }
-        val testMessage =
-            "{\"test\":\"Android connected to " + selectedUsbDevice!!.deviceName + "\"}\n"
-        try {
-            val data = testMessage.toByteArray(charset("UTF-8"))
-            val result = usbConnection!!.bulkTransfer(usbEndpoint, data, data.size, 1000)
-            if (result >= 0) {
-                Log.i(TAG, "✅ Тестовое сообщение отправлено успешно")
-            } else {
-                Log.e(TAG, "❌ Ошибка отправки тестового сообщения: $result")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Ошибка отправки тестового сообщения: " + e.message)
-        }
-    }
-
-    private fun closeUsbConnection() {
-        if (usbConnection != null) {
-            usbConnection!!.close()
-            usbConnection = null
-        }
-        selectedUsbDevice = null
-        usbEndpoint = null
-        isUsbConnected = false
-    }
-
-    fun sendVolumeData(volumeLevel: Int) {
-        var jsonData = "{\"volume\":$volumeLevel}"
-        Log.d(TAG, "Подготовка данных: $jsonData")
-
-        // 1. Эмуляция в Logcat
-        Log.i(TAG, "Для Arduino: $jsonData")
-
-        // 2. Отправка через USB (если подключено)
-        if (isUsbConnected && usbConnection != null && usbEndpoint != null && selectedUsbDevice != null) {
-            try {
-                // ВАЖНО: добавляем символ новой строки!
-                jsonData = "$jsonData\n"
-                val data = jsonData.toByteArray(charset("UTF-8"))
-                Log.d(
-                    TAG,
-                    "Отправка на " + selectedUsbDevice!!.deviceName + ": " + data.size + " байт"
-                )
-
-                // Отправляем данные
-                val result = usbConnection!!.bulkTransfer(usbEndpoint, data, data.size, 2000)
-                if (result >= 0) {
-                    Log.i(
-                        TAG,
-                        "✅ USB данные отправлены успешно на " +
-                                selectedUsbDevice!!.deviceName + ": " + result + " байт"
-                    )
-                } else {
-                    Log.e(
-                        TAG,
-                        "❌ Ошибка отправки USB на " +
-                                selectedUsbDevice!!.deviceName + ", код: " + result
-                    )
-                    if (result == -1) {
-                        Log.e(TAG, "Таймаут USB передачи")
-                    } else if (result == -2) {
-                        Log.e(TAG, "Ошибка USB передачи")
-                    }
-
-                    // Попытка переподключения
-                    setupUsbConnection(selectedUsbDevice)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Исключение при отправке USB: " + e.message)
-                e.printStackTrace()
-            }
-        } else {
-            val deviceName = selectedUsbDevice?.deviceName ?: "не выбрано"
-            Log.w(TAG, "⚠️ USB не подключено (устройство: $deviceName). Только эмуляция.")
-        }
-    }
-
-    private fun sendUsbStatusUpdate(status: String) {
-        val statusIntent = Intent("USB_STATUS_UPDATED")
-        statusIntent.putExtra("status", status)
-        sendBroadcast(statusIntent)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "=== Уничтожение сервиса ===")
 
-        // Отмена регистрации Receiver'ов
         try {
             unregisterReceiver(usbReceiver)
             unregisterReceiver(volumeReceiver)
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка отмены регистрации Receiver'ов: " + e.message)
+            Log.e(TAG, "Ошибка отмены регистрации Receiver'ов: ${e.message}")
         }
 
-        // Закрытие USB соединения
         closeUsbConnection()
     }
 
-    override fun onBind(intent: Intent): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent): IBinder = binder
 }
