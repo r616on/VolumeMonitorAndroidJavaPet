@@ -93,6 +93,16 @@
             android:textSize="12sp"
             android:textColor="#666666"
             android:layout_marginTop="20dp" />
+        <TextView
+            android:id="@+id/arduinoResponseTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Arduino: --"
+            android:textSize="14sp"
+            android:padding="10dp"
+            android:background="#E0F7FA"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="10dp" />
 
     </LinearLayout>
 </ScrollView>

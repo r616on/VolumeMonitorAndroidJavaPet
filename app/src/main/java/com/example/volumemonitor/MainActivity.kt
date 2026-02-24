@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var jsonTextView: TextView
     private lateinit var timestampTextView: TextView
     private lateinit var usbStatusTextView: TextView
+    private lateinit var arduinoResponseTextView: TextView
     private lateinit var refreshButton: Button
     private lateinit var settingsButton: ImageButton
 
@@ -36,6 +37,7 @@ class MainActivity : AppCompatActivity() {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
+    // Receiver для обновления громкости
     private val volumeUpdateReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if ("VOLUME_UPDATED" == intent.action) {
@@ -44,10 +46,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Receiver для статуса USB
     private val usbStatusReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if ("USB_STATUS_UPDATED" == intent.action) {
                 updateUsbStatus()
+            }
+        }
+    }
+
+    // Receiver для ответов от Arduino
+    private val arduinoResponseReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if ("ARDUINO_RESPONSE" == intent.action) {
+                val response = intent.getStringExtra("response") ?: ""
+                runOnUiThread {
+                    arduinoResponseTextView.text = "Arduino: $response"
+                    // Можно добавить в лог
+                    Log.d(TAG, "Ответ Arduino: $response")
+                }
             }
         }
     }
@@ -98,6 +115,7 @@ class MainActivity : AppCompatActivity() {
         }
         unregisterReceiver(volumeUpdateReceiver)
         unregisterReceiver(usbStatusReceiver)
+        unregisterReceiver(arduinoResponseReceiver)
     }
 
     private fun initUIElements() {
@@ -105,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         jsonTextView = findViewById(R.id.jsonTextView)
         timestampTextView = findViewById(R.id.timestampTextView)
         usbStatusTextView = findViewById(R.id.usbStatusTextView)
+        arduinoResponseTextView = findViewById(R.id.arduinoResponseTextView) // добавить в XML
         refreshButton = findViewById(R.id.refreshButton)
         settingsButton = findViewById(R.id.settingsButton)
     }
@@ -112,6 +131,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupButtons() {
         refreshButton.setOnClickListener {
             updateVolumeDisplay()
+            // Можно отправить ping для проверки связи
+            volumeService?.sendCommand("ping")
             Toast.makeText(this@MainActivity, "Обновлено", Toast.LENGTH_SHORT).show()
         }
         settingsButton.setOnClickListener {
@@ -121,17 +142,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun registerReceivers() {
-        val volumeFilter = IntentFilter("VOLUME_UPDATED")
-        registerReceiver(volumeUpdateReceiver, volumeFilter)
-        val usbStatusFilter = IntentFilter("USB_STATUS_UPDATED")
-        registerReceiver(usbStatusReceiver, usbStatusFilter)
+        registerReceiver(volumeUpdateReceiver, IntentFilter("VOLUME_UPDATED"))
+        registerReceiver(usbStatusReceiver, IntentFilter("USB_STATUS_UPDATED"))
+        registerReceiver(arduinoResponseReceiver, IntentFilter("ARDUINO_RESPONSE"))
         Log.d(TAG, "Broadcast Receiver'ы зарегистрированы")
     }
 
     private fun startAndBindService() {
         if (!isBound) {
             val serviceIntent = Intent(this, VolumeMonitorService::class.java)
-            startService(serviceIntent) // Ensure service is started
+            startService(serviceIntent)
             bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
             Log.d(TAG, "Сервис запущен и привязан")
         }
@@ -150,11 +170,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUsbStatus() {
-        if (isBound && volumeService != null) {
-            val status = volumeService!!.usbStatus
-            usbStatusTextView.text = "Статус: $status"
+        val status = if (isBound && volumeService != null) {
+            volumeService!!.usbStatus
         } else {
-            usbStatusTextView.text = "Статус: Сервис не доступен"
+            "Сервис не доступен"
         }
+        usbStatusTextView.text = "Статус USB: $status"
     }
 }

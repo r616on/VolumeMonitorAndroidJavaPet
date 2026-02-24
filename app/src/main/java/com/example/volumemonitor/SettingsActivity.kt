@@ -57,7 +57,7 @@ class SettingsActivity : AppCompatActivity() {
                         if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                             device?.let {
                                 Log.d(TAG, "Permission granted for device ${it.deviceName}")
-                                scanUsbDevices() // Rescan to update UI
+                                scanUsbDevices()
                             }
                         } else {
                             Log.d(TAG, "Permission denied for device ${device?.deviceName}")
@@ -228,8 +228,10 @@ $permissionText"""
         if (!isBound) {
             try {
                 val serviceIntent = Intent(this, VolumeMonitorService::class.java)
+                // Запускаем сервис, чтобы он оставался в памяти
+                startService(serviceIntent)
                 bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
-                Log.d(TAG, "Сервис привязан")
+                Log.d(TAG, "Сервис запущен и привязан")
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка привязки сервиса: ${e.message}")
             }
@@ -238,12 +240,12 @@ $permissionText"""
 
     private fun updateUsbStatus() {
         val status = if (isBound && volumeService?.isUsbConnected == true) "ПОДКЛЮЧЕНО" else "НЕТ ПОДКЛЮЧЕНИЯ"
-        usbStatusTextView.text = "Статус: $status"
+        usbStatusTextView.text = "Статус USB: $status"
     }
 
     private fun scanUsbDevices() {
         val adapter = usbDevicesSpinner.adapter as ArrayAdapter<String>
-        
+
         connectedUsbDevices.clear()
         connectedUsbDevices.addAll(usbManager.deviceList.values)
 
@@ -256,7 +258,7 @@ $permissionText"""
             connectedUsbDevices.forEachIndexed { index, device ->
                 val hasPermission = usbManager.hasPermission(device)
                 val permissionStatus = if (hasPermission) "[✅]" else "[❌]"
-                val isArduino = if (device.vendorId == 6790) " [Arduino]" else ""
+                val isArduino = if (device.vendorId == 0x2341 && device.productId == 0x0043) " [Arduino Nano]" else ""
                 val itemText = "${index + 1}. ${device.deviceName} $permissionStatus$isArduino"
                 adapter.add(itemText)
             }
@@ -277,7 +279,11 @@ $permissionText"""
         connectedUsbDevices.forEach {
             if (!usbManager.hasPermission(it)) {
                 try {
-                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_IMMUTABLE else 0
+                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                    } else {
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                    }
                     val permissionIntent = PendingIntent.getBroadcast(this, 0, Intent(USB_PERMISSION_ACTION), flags)
                     usbManager.requestPermission(it, permissionIntent)
                     requested++
