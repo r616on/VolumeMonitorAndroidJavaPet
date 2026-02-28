@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioManager: AudioManager
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val responseHistory = StringBuilder() // Для накопления истории
 
     // Receiver для обновления громкости
     private val volumeUpdateReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -56,15 +57,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Receiver для ответов от Arduino
-    private val arduinoResponseReceiver: BroadcastReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if ("ARDUINO_RESPONSE" == intent.action) {
-                val response = intent.getStringExtra("response") ?: ""
-                runOnUiThread {
-                    arduinoResponseTextView.text = "Arduino: $response"
-                    // Можно добавить в лог
-                    Log.d(TAG, "Ответ Arduino: $response")
+    private val arduinoResponseReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "ARDUINO_RESPONSE") {
+                var response = intent.getStringExtra("response") ?: ""
+
+                // Очищаем от лишних символов
+                response = response.trim()
+
+                // Убираем обрамление [ и ], если оно есть
+                if (response.startsWith("[") && response.endsWith("]")) {
+                    response = response.substring(1, response.length - 1)
                 }
+
+                // Добавляем в историю с временной меткой
+                val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                val formattedResponse = "[$timestamp] $response"
+
+                // Добавляем в начало истории (чтобы новые сообщения были сверху)
+                responseHistory.insert(0, "$formattedResponse\n")
+
+                // Ограничиваем историю (например, последние 10 сообщений)
+                val lines = responseHistory.toString().split("\n")
+                if (lines.size > 10) {
+                    responseHistory.clear()
+                    responseHistory.append(lines.take(10).joinToString("\n"))
+                }
+
+                // Обновляем TextView
+                arduinoResponseTextView.text = responseHistory.toString()
+
+                Log.d("ARDUINO_DEBUG", "Получено: $response")
             }
         }
     }
@@ -161,11 +184,23 @@ class MainActivity : AppCompatActivity() {
         val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         volumeTextView.text = "Громкость: $currentVolume / $maxVolume"
-        jsonTextView.text = "JSON: {\"volume\":$currentVolume}"
+
+        // Преобразование из диапазона 0-30 в 0-255
+        val targetVolume = if (currentVolume == 0) {
+            0 // Явно устанавливаем 0 для минимального значения
+        } else {
+            // Для остальных значений используем пропорциональное преобразование
+            // Формула: (currentValue * 255) / 30
+            // Используем Math.round для правильного округления
+            Math.round(currentVolume * 255.0 / 30.0).coerceIn(0, 255)
+        }
+
+        jsonTextView.text = "JSON: {\"volume\":$currentVolume,\"set_volume\":$targetVolume}"
         timestampTextView.text = "Время: ${timeFormat.format(Date())}"
 
+
         if (isBound) {
-            volumeService?.sendVolumeData(currentVolume)
+            volumeService?.sendVolumeData(targetVolume)
         }
     }
 

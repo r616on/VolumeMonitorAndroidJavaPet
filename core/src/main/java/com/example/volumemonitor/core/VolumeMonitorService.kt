@@ -117,7 +117,16 @@ class VolumeMonitorService : Service() {
                 if (streamType == AudioManager.STREAM_MUSIC) {
                     val currentVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
                     if (previousVolume != currentVolume) {
-                        sendVolumeData(currentVolume)
+                        // Преобразование из диапазона 0-30 в 0-255
+                        val targetVolume = if (currentVolume == 0) {
+                            0 // Явно устанавливаем 0 для минимального значения
+                        } else {
+                            // Для остальных значений используем пропорциональное преобразование
+                            // Формула: (currentValue * 255) / 30
+                            // Используем Math.round для правильного округления
+                            Math.round(currentVolume * 255.0 / 30.0).coerceIn(0, 255)
+                        }
+                        sendVolumeData(targetVolume)
                         Log.d(TAG, "Громкость изменилась: $currentVolume")
                         val volumeUpdateIntent = Intent("VOLUME_UPDATED")
                         volumeUpdateIntent.putExtra("volume", currentVolume)
@@ -293,8 +302,8 @@ class VolumeMonitorService : Service() {
     }
 
     // Отправка данных громкости
-    fun sendVolumeData(volumeLevel: Int) {
-        val json = "{\"volume\":$volumeLevel}"
+    fun sendVolumeData(volumeLevel: Long) {
+        val json = "{\"command\":\"set_volume\",\"volume\":$volumeLevel}"
         sendCommand(json)
     }
 
