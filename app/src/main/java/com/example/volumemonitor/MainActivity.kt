@@ -1,5 +1,6 @@
 package com.example.volumemonitor
-
+import android.app.PendingIntent
+import android.os.Build
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -98,6 +99,17 @@ class MainActivity : AppCompatActivity() {
             val binder = service as VolumeMonitorService.LocalBinder
             volumeService = binder.getService()
             isBound = true
+
+            // Создаём PendingIntent для открытия MainActivity из уведомления
+            val intent = Intent(this@MainActivity, MainActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(
+                this@MainActivity,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            volumeService?.setNotificationPendingIntent(pendingIntent)
+
             updateVolumeDisplay()
             updateUsbStatus()
             Toast.makeText(this@MainActivity, "Сервис запущен", Toast.LENGTH_SHORT).show()
@@ -154,8 +166,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupButtons() {
         refreshButton.setOnClickListener {
             updateVolumeDisplay()
-            // Можно отправить ping для проверки связи
-            volumeService?.sendCommand("ping")
+            volumeService?.sendCommand("ping") // или volumeService?.sendCurrentVolume() если нужно
             Toast.makeText(this@MainActivity, "Обновлено", Toast.LENGTH_SHORT).show()
         }
         settingsButton.setOnClickListener {
@@ -172,12 +183,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startAndBindService() {
-        if (!isBound) {
-            val serviceIntent = Intent(this, VolumeMonitorService::class.java)
+        val serviceIntent = Intent(this, VolumeMonitorService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent) // для Android 8+
+        } else {
             startService(serviceIntent)
-            bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
-            Log.d(TAG, "Сервис запущен и привязан")
         }
+        bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
+        Log.d(TAG, "Сервис запущен и привязан")
     }
 
     private fun updateVolumeDisplay() {
@@ -185,23 +198,16 @@ class MainActivity : AppCompatActivity() {
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         volumeTextView.text = "Громкость: $currentVolume / $maxVolume"
 
-        // Преобразование из диапазона 0-30 в 0-255
         val targetVolume = if (currentVolume == 0) {
-            0 // Явно устанавливаем 0 для минимального значения
+            0
         } else {
-            // Для остальных значений используем пропорциональное преобразование
-            // Формула: (currentValue * 255) / 30
-            // Используем Math.round для правильного округления
             Math.round(currentVolume * 255.0 / 30.0).coerceIn(0, 255)
         }
 
         jsonTextView.text = "JSON: {\"volume\":$currentVolume,\"set_volume\":$targetVolume}"
         timestampTextView.text = "Время: ${timeFormat.format(Date())}"
 
-
-        if (isBound) {
-            volumeService?.sendVolumeData(targetVolume)
-        }
+        // НЕ вызываем volumeService?.sendVolumeData(targetVolume) здесь
     }
 
     private fun updateUsbStatus() {

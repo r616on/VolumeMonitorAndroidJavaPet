@@ -1,5 +1,8 @@
 package com.example.volumemonitor.core
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -15,7 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.util.Log
-import com.hoho.android.usbserial.driver.UsbSerialDriver
+import androidx.core.app.NotificationCompat
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
@@ -24,6 +27,7 @@ import java.io.IOException
 class VolumeMonitorService : Service() {
     private val TAG = "VolumeMonitor"
     private val ACTION_USB_PERMISSION = "com.example.volumemonitor.USB_PERMISSION"
+    private val NOTIFICATION_ID = 1001
 
     private var audioManager: AudioManager? = null
     private var usbManager: UsbManager? = null
@@ -32,10 +36,15 @@ class VolumeMonitorService : Service() {
     private var previousVolume = -1
     private val binder: IBinder = LocalBinder()
 
+    // Для уведомления
+    private var notificationPendingIntent: PendingIntent? = null
+
     var isUsbConnected = false
         private set
     var usbStatus = "Инициализация..."
         private set
+
+    private var selectedDevice: UsbDevice? = null
 
     // Коллбэк для чтения данных от Arduino
     private val serialListener = object : SerialInputOutputManager.Listener {
@@ -88,11 +97,20 @@ class VolumeMonitorService : Service() {
                     val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
                     device?.let {
                         Log.i(TAG, "USB устройство подключено: ${it.deviceName}")
-                        usbStatus = "Устройство подключено: ${it.deviceName}"
-                        if (selectedDevice?.deviceId == it.deviceId || selectedDevice == null) {
-                            requestUsbPermission(it)
+                        val saved = loadSavedDevice()
+                        if (saved != null && it.vendorId == saved.first && it.productId == saved.second) {
+                            selectedDevice = it
+                            if (usbManager?.hasPermission(it) == true) {
+                                openSerialConnection(it)
+                            } else {
+                                usbStatus = "Устройство подключено, но нет разрешения"
+                                sendUsbStatusUpdate(usbStatus)
+                                requestUsbPermission(it)
+                            }
+                        } else {
+                            usbStatus = "Подключено неизвестное устройство: ${it.deviceName}"
+                            sendUsbStatusUpdate(usbStatus)
                         }
-                        sendUsbStatusUpdate("Устройство подключено: ${it.deviceName}")
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
@@ -117,13 +135,9 @@ class VolumeMonitorService : Service() {
                 if (streamType == AudioManager.STREAM_MUSIC) {
                     val currentVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
                     if (previousVolume != currentVolume) {
-                        // Преобразование из диапазона 0-30 в 0-255
                         val targetVolume = if (currentVolume == 0) {
-                            0 // Явно устанавливаем 0 для минимального значения
+                            0
                         } else {
-                            // Для остальных значений используем пропорциональное преобразование
-                            // Формула: (currentValue * 255) / 30
-                            // Используем Math.round для правильного округления
                             Math.round(currentVolume * 255.0 / 30.0).coerceIn(0, 255)
                         }
                         sendVolumeData(targetVolume)
@@ -138,10 +152,16 @@ class VolumeMonitorService : Service() {
         }
     }
 
-    private var selectedDevice: UsbDevice? = null
-
     inner class LocalBinder : Binder() {
         fun getService(): VolumeMonitorService = this@VolumeMonitorService
+    }
+
+    // Загрузка сохранённого устройства
+    private fun loadSavedDevice(): Pair<Int, Int>? {
+        val prefs = getSharedPreferences("UsbDevicePrefs", Context.MODE_PRIVATE)
+        val vid = prefs.getInt("vendorId", -1)
+        val pid = prefs.getInt("productId", -1)
+        return if (vid != -1 && pid != -1) Pair(vid, pid) else null
     }
 
     // Метод для установки выбранного устройства из SettingsActivity
@@ -159,9 +179,17 @@ class VolumeMonitorService : Service() {
         }
     }
 
+    // Метод для передачи PendingIntent из MainActivity (для уведомления)
+    fun setNotificationPendingIntent(pendingIntent: PendingIntent) {
+        notificationPendingIntent = pendingIntent
+        // Обновляем уведомление с новым Intent
+        startForeground(NOTIFICATION_ID, createNotification())
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "=== Создание сервиса ===")
+
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         usbManager = getSystemService(USB_SERVICE) as UsbManager
 
@@ -177,6 +205,58 @@ class VolumeMonitorService : Service() {
 
         previousVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
         Log.d(TAG, "Сервис создан успешно")
+
+        // Запуск foreground (пока без PendingIntent, установится позже из MainActivity)
+        startForeground(NOTIFICATION_ID, createNotification())
+
+        // Попытка подключиться к сохранённому устройству
+        val saved = loadSavedDevice()
+        if (saved != null) {
+            val (vid, pid) = saved
+            val matchingDevice = usbManager?.deviceList?.values?.find {
+                it.vendorId == vid && it.productId == pid
+            }
+            if (matchingDevice != null) {
+                selectedDevice = matchingDevice
+                if (usbManager?.hasPermission(matchingDevice) == true) {
+                    openSerialConnection(matchingDevice)
+                } else {
+                    usbStatus = "Нет разрешения для сохранённого устройства"
+                    sendUsbStatusUpdate(usbStatus)
+                    // АВТОМАТИЧЕСКИЙ ЗАПРОС
+                    requestUsbPermission(matchingDevice)
+                }
+            } else {
+                Log.d(TAG, "Сохранённое устройство не подключено")
+            }
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val channelId = "volume_monitor_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Монитор громкости",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Сервис отслеживает громкость и отправляет данные на Arduino"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Монитор громкости")
+            .setContentText("Отслеживание громкости активно")
+            .setSmallIcon(android.R.drawable.ic_dialog_info) // замените на свою иконку
+            .setOngoing(true)
+
+        notificationPendingIntent?.let {
+            builder.setContentIntent(it)
+        }
+
+        return builder.build()
     }
 
     override fun onDestroy() {
@@ -225,7 +305,6 @@ class VolumeMonitorService : Service() {
         }
 
         try {
-            // Поиск драйвера для устройства
             val driver = UsbSerialProber.getDefaultProber().probeDevice(device)
             if (driver == null) {
                 Log.e(TAG, "Нет драйвера для устройства")
@@ -234,10 +313,7 @@ class VolumeMonitorService : Service() {
                 return
             }
 
-            // Берём первый порт
             val port = driver.ports[0]
-
-            // Открываем соединение с устройством через UsbManager
             val connection: UsbDeviceConnection = manager.openDevice(device) ?: run {
                 Log.e(TAG, "Не удалось открыть соединение с устройством")
                 usbStatus = "Ошибка открытия соединения"
@@ -245,9 +321,7 @@ class VolumeMonitorService : Service() {
                 return
             }
 
-            // Открываем порт, передавая connection
             port.open(connection)
-            // Настраиваем параметры: скорость 115200, 8 бит, 1 стоп-бит, без чётности
             port.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
 
             Log.i(TAG, "Порт открыт, скорость 115200")
@@ -257,12 +331,11 @@ class VolumeMonitorService : Service() {
             usbStatus = "Подключено: ${device.deviceName}"
             sendUsbStatusUpdate("USB подключено: ${device.deviceName}")
 
-            // Запускаем асинхронное чтение
             serialIoManager = SerialInputOutputManager(port, serialListener)
             serialIoManager?.start()
 
-            // Отправляем тестовое сообщение ping
-            sendCommand("ping")
+            // Отправляем текущую громкость при подключении
+            sendCurrentVolume()
 
         } catch (e: Exception) {
             Log.e(TAG, "Ошибка открытия последовательного порта: ${e.message}")
@@ -305,6 +378,13 @@ class VolumeMonitorService : Service() {
     fun sendVolumeData(volumeLevel: Long) {
         val json = "{\"command\":\"set_volume\",\"volume\":$volumeLevel}"
         sendCommand(json)
+    }
+
+    // Отправка текущей громкости
+    fun sendCurrentVolume() {
+        val current = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+        val target = if (current == 0) 0 else Math.round(current * 255.0 / 30.0).coerceIn(0, 255)
+        sendVolumeData(target)
     }
 
     private fun sendUsbStatusUpdate(status: String) {
