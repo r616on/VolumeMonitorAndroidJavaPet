@@ -20,13 +20,14 @@ import com.example.volumemonitor.core.VolumeMonitorService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.widget.SeekBar
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
 
     private lateinit var volumeTextView: TextView
     private lateinit var jsonTextView: TextView
-    private lateinit var timestampTextView: TextView
     private lateinit var usbStatusTextView: TextView
     private lateinit var arduinoResponseTextView: TextView
     private lateinit var refreshButton: Button
@@ -38,6 +39,39 @@ class MainActivity : AppCompatActivity() {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val responseHistory = StringBuilder() // Для накопления истории
+    private lateinit var bassSeekBar: SeekBar
+    private lateinit var bassValueTextView: TextView
+    private var lastSentBassLevel: Int? = null
+    private val PREFS_NAME = "BassPrefs"
+    private val KEY_BASS_LEVEL = "bass_level"
+
+    private fun loadBassLevel(): Int {
+        return getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_BASS_LEVEL, 0) // По умолчанию 0 дБ
+    }
+
+    private fun saveBassLevel(level: Int) {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_BASS_LEVEL, level)
+            .apply()
+    }
+
+    private fun updateBassText(level: Int) {
+        val sign = if (level > 0) "+$level" else level.toString()
+        bassValueTextView.text = "$sign dB"
+    }
+
+    private fun sendBassCommand(level: Int) {
+        // Кусочно-линейное преобразование -6..6 → 0..255 с точкой 0 дБ → 130
+        val value = if (level <= 0) {
+            ((level + 6) * 130f / 6f).roundToInt()
+        } else {
+            (130f + (level * 125f / 6f)).roundToInt()
+        }.coerceIn(0, 255)
+
+        volumeService?.sendCommand("{\"command\":\"set_bass_level\",\"value\":$value}")
+        Log.d(TAG, "Bass level: $level dB -> value: $value")
+    }
 
     // Receiver для обновления громкости
     private val volumeUpdateReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -113,6 +147,8 @@ class MainActivity : AppCompatActivity() {
             updateVolumeDisplay()
             updateUsbStatus()
             Toast.makeText(this@MainActivity, "Сервис запущен", Toast.LENGTH_SHORT).show()
+            val currentBass = bassSeekBar.progress - 6
+            sendBassCommand(currentBass)
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -130,6 +166,30 @@ class MainActivity : AppCompatActivity() {
         initUIElements()
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         setupButtons()
+        val savedBass = loadBassLevel()
+        bassSeekBar.progress = savedBass + 6          // перевод -6..6 → 0..12
+        updateBassText(savedBass)
+
+        bassSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val level = progress - 6
+                    updateBassText(level)
+                    // Отправляем команду, только если значение действительно изменилось
+                    if (lastSentBassLevel != level) {
+                        sendBassCommand(level)
+                        lastSentBassLevel = level
+                    }
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                val level = (seekBar?.progress ?: 6) - 6
+                saveBassLevel(level)   // сохраняем финальное значение
+            }
+        })
     }
 
     override fun onResume() {
@@ -156,11 +216,12 @@ class MainActivity : AppCompatActivity() {
     private fun initUIElements() {
         volumeTextView = findViewById(R.id.volumeTextView)
         jsonTextView = findViewById(R.id.jsonTextView)
-        timestampTextView = findViewById(R.id.timestampTextView)
         usbStatusTextView = findViewById(R.id.usbStatusTextView)
         arduinoResponseTextView = findViewById(R.id.arduinoResponseTextView) // добавить в XML
         refreshButton = findViewById(R.id.refreshButton)
         settingsButton = findViewById(R.id.settingsButton)
+        bassSeekBar = findViewById(R.id.bassSeekBar)
+        bassValueTextView = findViewById(R.id.bassValueTextView)
     }
 
     private fun setupButtons() {
@@ -204,8 +265,7 @@ class MainActivity : AppCompatActivity() {
             Math.round(currentVolume * 255.0 / 30.0).coerceIn(0, 255)
         }
 
-        jsonTextView.text = "JSON: {\"volume\":$currentVolume,\"set_volume\":$targetVolume}"
-        timestampTextView.text = "Время: ${timeFormat.format(Date())}"
+        jsonTextView.text = "JSON: {\"value\":$currentVolume,\"set_volume\":$targetVolume}"
 
         // НЕ вызываем volumeService?.sendVolumeData(targetVolume) здесь
     }

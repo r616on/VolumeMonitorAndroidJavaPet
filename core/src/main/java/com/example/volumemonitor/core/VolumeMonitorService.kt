@@ -376,7 +376,7 @@ class VolumeMonitorService : Service() {
 
     // Отправка данных громкости
     fun sendVolumeData(volumeLevel: Long) {
-        val json = "{\"command\":\"set_volume\",\"volume\":$volumeLevel}"
+        val json = "{\"command\":\"set_volume\",\"value\":$volumeLevel}"
         sendCommand(json)
     }
 
