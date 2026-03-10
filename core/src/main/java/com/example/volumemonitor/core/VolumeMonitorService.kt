@@ -28,7 +28,7 @@ class VolumeMonitorService : Service() {
     private val TAG = "VolumeMonitor"
     private val ACTION_USB_PERMISSION = "com.example.volumemonitor.USB_PERMISSION"
     private val NOTIFICATION_ID = 1001
-
+    private val serialBuffer = StringBuilder()
     private var audioManager: AudioManager? = null
     private var usbManager: UsbManager? = null
     private var serialPort: UsbSerialPort? = null
@@ -49,11 +49,22 @@ class VolumeMonitorService : Service() {
     // Коллбэк для чтения данных от Arduino
     private val serialListener = object : SerialInputOutputManager.Listener {
         override fun onNewData(data: ByteArray) {
-            val message = String(data, Charsets.UTF_8)
-            Log.d(TAG, "Получено от Arduino: $message")
-            val intent = Intent("ARDUINO_RESPONSE")
-            intent.putExtra("response", message)
-            sendBroadcast(intent)
+            val chunk = String(data, Charsets.UTF_8)
+            serialBuffer.append(chunk)
+
+            // Обрабатываем все полные строки в буфере
+            var index: Int
+            while (serialBuffer.indexOf("\n").also { index = it } >= 0) {
+                val line = serialBuffer.substring(0, index).trim()
+                serialBuffer.delete(0, index + 1)
+
+                if (line.isNotEmpty()) {
+                    Log.d(TAG, "Полная строка от Arduino: $line")
+                    val intent = Intent("ARDUINO_RESPONSE")
+                    intent.putExtra("response", line)
+                    sendBroadcast(intent)
+                }
+            }
         }
 
         override fun onRunError(e: Exception) {

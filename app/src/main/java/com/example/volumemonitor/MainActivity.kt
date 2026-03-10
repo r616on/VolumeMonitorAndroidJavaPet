@@ -22,10 +22,15 @@ import java.util.Date
 import java.util.Locale
 import android.widget.SeekBar
 import kotlin.math.roundToInt
+import org.json.JSONObject
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
-
+    private lateinit var changePresetButton: Button
+    private lateinit var presetTextView: TextView
+    private var currentPreset: Int? = null
     private lateinit var volumeTextView: TextView
     private lateinit var jsonTextView: TextView
     private lateinit var usbStatusTextView: TextView
@@ -121,7 +126,23 @@ class MainActivity : AppCompatActivity() {
 
                 // Обновляем TextView
                 arduinoResponseTextView.text = responseHistory.toString()
-
+                // Пытаемся распарсить как JSON команду preset_changed
+                try {
+                    val jsonObject = JSONObject(response)
+                    val command = jsonObject.optString("command")
+                    if (command == "preset_changed") {
+                        val value = jsonObject.optInt("value", -1)
+                        if (value != -1) {
+                            currentPreset = value
+                            runOnUiThread {
+                                presetTextView.text = "Текущий пресет: $value"
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Это не JSON или другая команда — просто игнорируем
+                    Log.d(TAG, "Не удалось распарсить JSON: ${e.message}")
+                }
                 Log.d("ARDUINO_DEBUG", "Получено: $response")
             }
         }
@@ -222,6 +243,8 @@ class MainActivity : AppCompatActivity() {
         settingsButton = findViewById(R.id.settingsButton)
         bassSeekBar = findViewById(R.id.bassSeekBar)
         bassValueTextView = findViewById(R.id.bassValueTextView)
+        presetTextView = findViewById(R.id.presetTextView)
+        changePresetButton = findViewById(R.id.changePresetButton)
     }
 
     private fun setupButtons() {
@@ -233,6 +256,18 @@ class MainActivity : AppCompatActivity() {
         settingsButton.setOnClickListener {
             val intent = Intent(this, SettingsActivity::class.java)
             startActivity(intent)
+        }
+        changePresetButton.setOnClickListener {
+            // Отправляем команду смены пресета (без параметров)
+            volumeService?.sendCommand("{\"command\":\"change_preset\"}")
+
+            // Блокируем кнопку
+            changePresetButton.isEnabled = false
+
+            // Через 2 секунды разблокируем
+            Handler(Looper.getMainLooper()).postDelayed({
+                changePresetButton.isEnabled = true
+            }, 2000)
         }
     }
 

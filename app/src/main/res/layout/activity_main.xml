@@ -99,6 +99,20 @@
                 android:progress="6" />
 
         </LinearLayout>
+        <Button
+            android:id="@+id/changePresetButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Сменить пресет"
+            android:layout_marginBottom="20dp" />
+        <TextView
+            android:id="@+id/presetTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Текущий пресет: --"
+            android:textSize="16sp"
+            android:textColor="#4CAF50"
+            android:layout_marginBottom="20dp" />
 
         <!-- Статус USB -->
         <TextView
