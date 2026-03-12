@@ -37,7 +37,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var jsonTextView: TextView
     private lateinit var usbStatusTextView: TextView
     private lateinit var arduinoResponseTextView: TextView
-    private lateinit var refreshButton: Button
     private lateinit var settingsButton: ImageButton
 
     private var volumeService: VolumeMonitorService? = null
@@ -137,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                         if (value != -1) {
                             currentPreset = value
                             runOnUiThread {
-                                presetTextView.text = "Текущий пресет: $value"
+                                presetTextView.text = "$value"
                             }
                         }
                     }
@@ -241,7 +240,6 @@ class MainActivity : AppCompatActivity() {
         jsonTextView = findViewById(R.id.jsonTextView)
         usbStatusTextView = findViewById(R.id.usbStatusTextView)
         arduinoResponseTextView = findViewById(R.id.arduinoResponseTextView) // добавить в XML
-        refreshButton = findViewById(R.id.refreshButton)
         settingsButton = findViewById(R.id.settingsButton)
         bassSeekBar = findViewById(R.id.bassSeekBar)
         bassValueTextView = findViewById(R.id.bassValueTextView)
@@ -251,11 +249,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupButtons() {
-        refreshButton.setOnClickListener {
-            updateVolumeDisplay()
-            volumeService?.sendCommand("ping") // или volumeService?.sendCurrentVolume() если нужно
-            Toast.makeText(this@MainActivity, "Обновлено", Toast.LENGTH_SHORT).show()
-        }
         settingsButton.setOnClickListener {
             val intent = Intent(this, SettingsActivity::class.java)
             startActivity(intent)
@@ -264,22 +257,25 @@ class MainActivity : AppCompatActivity() {
             // Отправляем команду смены пресета (без параметров)
             volumeService?.sendCommand("{\"command\":\"change_preset\"}")
 
-            // Блокируем кнопку
+            requestPresetButton.isEnabled = false
             changePresetButton.isEnabled = false
 
             // Через 2 секунды разблокируем
             Handler(Looper.getMainLooper()).postDelayed({
+                requestPresetButton.isEnabled = true
                 changePresetButton.isEnabled = true
             }, 3000)
         }
         requestPresetButton.setOnClickListener {
             volumeService?.sendCommand("{\"command\":\"get_preset\"}")
-            // Блокируем кнопку
+
             requestPresetButton.isEnabled = false
+            changePresetButton.isEnabled = false
 
             // Через 2 секунды разблокируем
             Handler(Looper.getMainLooper()).postDelayed({
                 requestPresetButton.isEnabled = true
+                changePresetButton.isEnabled = true
             }, 3000)
             Toast.makeText(this, "Запрос пресета отправлен", Toast.LENGTH_SHORT).show()
         }
