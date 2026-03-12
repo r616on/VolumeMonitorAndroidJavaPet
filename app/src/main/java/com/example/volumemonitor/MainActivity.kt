@@ -30,7 +30,9 @@ class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
     private lateinit var changePresetButton: Button
     private lateinit var presetTextView: TextView
-    private var currentPreset: Int? = null
+    private var currentPreset: Int? = 1
+
+    private lateinit var requestPresetButton: Button
     private lateinit var volumeTextView: TextView
     private lateinit var jsonTextView: TextView
     private lateinit var usbStatusTextView: TextView
@@ -245,6 +247,7 @@ class MainActivity : AppCompatActivity() {
         bassValueTextView = findViewById(R.id.bassValueTextView)
         presetTextView = findViewById(R.id.presetTextView)
         changePresetButton = findViewById(R.id.changePresetButton)
+        requestPresetButton = findViewById(R.id.requestPresetButton)
     }
 
     private fun setupButtons() {
@@ -267,7 +270,18 @@ class MainActivity : AppCompatActivity() {
             // Через 2 секунды разблокируем
             Handler(Looper.getMainLooper()).postDelayed({
                 changePresetButton.isEnabled = true
-            }, 2000)
+            }, 3000)
+        }
+        requestPresetButton.setOnClickListener {
+            volumeService?.sendCommand("{\"command\":\"get_preset\"}")
+            // Блокируем кнопку
+            requestPresetButton.isEnabled = false
+
+            // Через 2 секунды разблокируем
+            Handler(Looper.getMainLooper()).postDelayed({
+                requestPresetButton.isEnabled = true
+            }, 3000)
+            Toast.makeText(this, "Запрос пресета отправлен", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -302,7 +316,6 @@ class MainActivity : AppCompatActivity() {
 
         jsonTextView.text = "JSON: {\"value\":$currentVolume,\"set_volume\":$targetVolume}"
 
-        // НЕ вызываем volumeService?.sendVolumeData(targetVolume) здесь
     }
 
     private fun updateUsbStatus() {
